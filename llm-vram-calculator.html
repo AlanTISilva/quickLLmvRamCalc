@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM VRAM Calculator • Canvas</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600&amp;display=swap');
+        
+        :root {
+            --accent: #6366f1;
+        }
+        
+        body {
+            font-family: 'Inter', system_ui, sans-serif;
+        }
+        
+        .font-display {
+            font-family: 'Space Grotesk', 'Inter', system_ui, sans-serif;
+            font-weight: 600;
+        }
+
+        .section-card {
+            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
+                       box-shadow 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+        }
+        
+        .section-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+        }
+
+        .metric-value {
+            font-variant-numeric: tabular-nums;
+        }
+
+        .quant-option {
+            transition: all 0.1s ease;
+        }
+
+        canvas {
+            image-rendering: crisp-edges;
+        }
+
+        .vram-bar {
+            box-shadow: inset 0 2px 4px 0 rgb(0 0 0 / 0.3);
+        }
+
+        .preset-btn {
+            transition: all 0.1s cubic-bezier(0.4, 0.0, 0.2, 1);
+        }
+        
+        .preset-btn:hover {
+            transform: translateY(-1px);
+            background-color: #27251f;
+        }
+        
+        .preset-btn.active {
+            background-color: #312e81;
+            border-color: #6366f1;
+            color: white;
+        }
+
+        .kv-toggle {
+            transition: all 0.1s ease;
+        }
+
+        .kv-toggle.active {
+            background-color: #312e81;
+            border-color: #6366f1;
+            color: white;
+            box-shadow: 0 0 0 1px #6366f1;
+        }
+
+        .result-card {
+            background: linear-gradient(145deg, #18181b, #27251f);
+        }
+
+        .mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+    </style>
+</head>
+<body class="bg-zinc-950 text-zinc-200">
+    <div class="max-w-[1080px] mx-auto px-6 py-8">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-8">
+            <div class="flex items-center gap-x-3">
+                <div class="w-11 h-11 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-inner">
+                    <i class="fa-solid fa-microchip text-white text-3xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-display text-4xl tracking-tighter font-semibold">LLM VRAM Calculator</h1>
+                    <p class="text-zinc-400 text-sm -mt-1">Model weights + KV cache estimator</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-x-2 text-xs">
+                <div class="px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-2xl flex items-center gap-x-2">
+                    <div class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+                    <span class="text-emerald-400 font-medium">llama.cpp / GGUF ready</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- MODEL WEIGHTS CARD -->
+            <div class="lg:col-span-5 bg-zinc-900 border border-zinc-800 rounded-3xl p-6 section-card">
+                <div class="flex items-center gap-x-2 mb-5">
+                    <i class="fa-solid fa-weight-hanging text-indigo-400 w-5"></i>
+                    <h2 class="font-semibold text-xl tracking-tight">Model Weights</h2>
+                </div>
+
+                <!-- Parameters -->
+                <div class="mb-5">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <label class="text-sm font-medium text-zinc-400">Parameters</label>
+                        <span id="paramsValue" class="font-mono text-xs bg-zinc-950 px-2 py-px rounded text-zinc-400">7.0 B</span>
+                    </div>
+                    <div class="flex gap-2">
+                        <input type="number" id="params" value="7.0" step="0.1" min="0.5" max="500"
+                               class="flex-1 bg-zinc-950 border border-zinc-700 focus:border-indigo-500 transition-colors rounded-2xl px-4 py-3 text-lg font-medium mono focus:outline-none">
+                        <span class="flex items-center px-3 text-sm text-zinc-400 self-center">Billion</span>
+                    </div>
+                    
+                    <!-- Quick presets -->
+                    <div class="flex flex-wrap gap-1.5 mt-2.5" id="paramPresets">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Weight Quantization -->
+                <div>
+                    <label class="text-sm font-medium text-zinc-400 block mb-1.5">Weight Quantization</label>
+                    <select id="weightQuant" 
+                            class="w-full bg-zinc-950 border border-zinc-700 focus:border-indigo-500 transition-colors rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none">
+                        <!-- Populated by JS -->
+                    </select>
+                    <div class="mt-2 text-[10px] text-zinc-500 px-1 flex items-center gap-1">
+                        <i class="fa-solid fa-info-circle"></i>
+                        <span>Based on typical GGUF file sizes</span>
+                    </div>
+                </div>
+
+                <!-- Weights Result -->
+                <div class="mt-5 pt-4 border-t border-zinc-800">
+                    <div class="flex items-baseline justify-between">
+                        <div>
+                            <div class="text-xs tracking-widest text-zinc-400 font-medium">ESTIMATED WEIGHTS VRAM</div>
+                            <div id="weightsVram" 
+                                 class="font-display text-4xl font-semibold tracking-tighter text-sky-400 mono">14.00</div>
+                            <div class="text-sky-400/70 text-sm -mt-1">GB</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="inline-flex items-center gap-1 text-xs px-2.5 py-1 bg-zinc-950 border border-zinc-700 rounded-2xl">
+                                <i class="fa-solid fa-database text-sky-400"></i>
+                                <span class="font-medium text-zinc-300" id="weightsBytesPerParam">2.00 B/param</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KV CACHE CARD -->
+            <div class="lg:col-span-7 bg-zinc-900 border border-zinc-800 rounded-3xl p-6 section-card">
+                <div class="flex items-center gap-x-2 mb-5">
+                    <i class="fa-solid fa-memory text-violet-400 w-5"></i>
+                    <h2 class="font-semibold text-xl tracking-tight">KV Cache</h2>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+                    
+                    <!-- Context Length -->
+                    <div class="md:col-span-3">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <label class="text-sm font-medium text-zinc-400">Context Length</label>
+                            <span id="contextValue" class="font-mono text-xs bg-zinc-950 px-2 py-px rounded text-violet-300">8,192 tokens</span>
+                        </div>
+                        <div class="flex gap-2 items-center">
+                            <input type="range" id="contextSlider" min="512" max="131072" step="512" value="8192"
+                                   class="flex-1 accent-violet-500">
+                            <input type="number" id="context" value="8192" step="512"
+                                   class="w-28 bg-zinc-950 border border-zinc-700 focus:border-violet-500 transition-colors rounded-2xl px-3 py-2 text-sm mono focus:outline-none">
+                        </div>
+                        
+                        <!-- Context quick buttons -->
+                        <div class="flex flex-wrap gap-1 mt-2">
+                            <button onclick="setContext(4096)" class="text-[10px] px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 transition-colors rounded-2xl border border-zinc-700 text-zinc-300">4K</button>
+                            <button onclick="setContext(8192)" class="text-[10px] px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 transition-colors rounded-2xl border border-zinc-700 text-zinc-300">8K</button>
+                            <button onclick="setContext(16384)" class="text-[10px] px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 transition-colors rounded-2xl border border-zinc-700 text-zinc-300">16K</button>
+                            <button onclick="setContext(32768)" class="text-[10px] px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 transition-colors rounded-2xl border border-zinc-700 text-zinc-300">32K</button>
+                            <button onclick="setContext(65536)" class="text-[10px] px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 transition-colors rounded-2xl border border-zinc-700 text-zinc-300">64K</button>
+                            <button onclick="setContext(131072)" class="text-[10px] px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-600 transition-colors rounded-2xl border border-zinc-700 text-zinc-300">128K</button>
+                        </div>
+                    </div>
+
+                    <!-- KV Quant -->
+                    <div class="md:col-span-2">
+                        <label class="text-sm font-medium text-zinc-400 block mb-1.5">KV Cache Quantization</label>
+                        <div class="flex gap-2">
+                            <div onclick="selectKVQuant('fp16')" id="kvFp16Btn"
+                                 class="kv-toggle flex-1 cursor-pointer select-none border border-zinc-600 hover:border-zinc-400 active:bg-zinc-800 transition-all text-center py-[9px] rounded-2xl text-sm font-semibold flex items-center justify-center gap-1.5 bg-zinc-950">
+                                <i class="fa-solid fa-microchip"></i>
+                                <span>FP16</span>
+                            </div>
+                            <div onclick="selectKVQuant('q8')" id="kvQ8Btn"
+                                 class="kv-toggle flex-1 cursor-pointer select-none border border-zinc-600 hover:border-zinc-400 active:bg-zinc-800 transition-all text-center py-[9px] rounded-2xl text-sm font-semibold flex items-center justify-center gap-1.5 bg-zinc-950">
+                                <i class="fa-solid fa-compress-alt"></i>
+                                <span>Q8_0</span>
+                            </div>
+                        </div>
+                        <div class="text-[10px] text-center text-zinc-500 mt-1">Q8_0 ≈ 50% smaller KV cache</div>
+                    </div>
+                </div>
+
+                <!-- Architecture -->
+                <div class="mt-4">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <label class="text-sm font-medium text-zinc-400">Architecture Preset</label>
+                        <span class="text-[10px] text-zinc-500">Affects KV cache calculation</span>
+                    </div>
+                    <select id="archPreset" 
+                            class="w-full bg-zinc-950 border border-zinc-700 focus:border-violet-500 transition-colors rounded-2xl px-4 py-[9px] text-sm font-medium focus:outline-none">
+                        <!-- Populated by JS -->
+                    </select>
+                </div>
+
+                <!-- Advanced -->
+                <details class="mt-3 group">
+                    <summary class="cursor-pointer text-xs flex items-center gap-1.5 text-zinc-400 hover:text-zinc-300 select-none py-1">
+                        <i class="fa-solid fa-sliders-h group-open:rotate-90 transition-transform w-3"></i>
+                        <span class="font-medium">Advanced architecture settings</span>
+                    </summary>
+                    <div class="grid grid-cols-2 gap-3 pt-3">
+                        <div>
+                            <label class="text-xs text-zinc-400 block mb-1">Number of Layers</label>
+                            <input type="number" id="numLayers" value="32" min="1" max="200"
+                                   class="w-full bg-zinc-950 border border-zinc-700 focus:border-violet-400 transition-colors rounded-2xl px-3 py-2 text-sm mono focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="text-xs text-zinc-400 block mb-1">KV Dimension <span class="text-zinc-500">(num_kv_heads × head_dim)</span></label>
+                            <input type="number" id="kvDim" value="1024" min="256" max="16384" step="128"
+                                   class="w-full bg-zinc-950 border border-zinc-700 focus:border-violet-400 transition-colors rounded-2xl px-3 py-2 text-sm mono focus:outline-none">
+                            <div class="text-[9px] text-zinc-500 mt-0.5 px-1">1024 = Llama-3 GQA &nbsp;•&nbsp; 4096 = Llama-2 MHA</div>
+                        </div>
+                    </div>
+                </details>
+
+                <!-- KV Result -->
+                <div class="mt-4 pt-4 border-t border-zinc-800">
+                    <div class="flex items-baseline justify-between">
+                        <div>
+                            <div class="text-xs tracking-widest text-zinc-400 font-medium">KV CACHE VRAM</div>
+                            <div id="kvVram" class="font-display text-4xl font-semibold tracking-tighter text-violet-400 mono">0.54</div>
+                            <div class="text-violet-400/70 text-sm -mt-1">GB</div>
+                        </div>
+                        <div class="px-3 py-1 bg-zinc-950 border border-zinc-700 rounded-2xl text-xs">
+                            <span id="kvElementSize">1.00 byte/element</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VISUALIZATION: Canvas Bar -->
+            <div class="lg:col-span-12 bg-zinc-900 border border-zinc-800 rounded-3xl p-6 section-card">
+                <div class="flex items-center justify-between mb-4 px-1">
+                    <div>
+                        <h3 class="font-semibold tracking-tight">VRAM Usage Breakdown</h3>
+                        <p class="text-xs text-zinc-400">Visual estimate of total memory required</p>
+                    </div>
+                    <div class="flex items-center gap-x-4 text-xs">
+                        <div class="flex items-center gap-x-1.5">
+                            <div class="w-3 h-3 rounded bg-sky-500"></div>
+                            <span class="text-zinc-300">Weights</span>
+                        </div>
+                        <div class="flex items-center gap-x-1.5">
+                            <div class="w-3 h-3 rounded bg-violet-500"></div>
+                            <span class="text-zinc-300">KV Cache</span>
+                        </div>
+                        <div class="flex items-center gap-x-1.5">
+                            <div class="w-3 h-3 rounded bg-emerald-500/70"></div>
+                            <span class="text-zinc-300">Runtime overhead</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="relative">
+                    <canvas id="vramCanvas" width="1000" height="92" 
+                            class="w-full rounded-2xl bg-zinc-950 border border-zinc-800 vram-bar"></canvas>
+                    
+                    <!-- Canvas legend / labels are drawn in JS -->
+                </div>
+                
+                <div class="flex justify-between items-center mt-2 px-1 text-[10px] text-zinc-500">
+                    <div>0 GB</div>
+                    <div id="canvasMaxLabel">~50 GB</div>
+                </div>
+            </div>
+
+            <!-- TOTAL + GPU FIT -->
+            <div class="lg:col-span-12 grid grid-cols-1 md:grid-cols-12 gap-6">
+                
+                <!-- Total VRAM -->
+                <div class="md:col-span-7 bg-zinc-900 border border-zinc-800 rounded-3xl p-6 flex flex-col justify-between section-card">
+                    <div>
+                        <div class="uppercase text-xs tracking-[1.5px] text-zinc-400 font-medium mb-1">TOTAL ESTIMATED VRAM NEEDED</div>
+                        <div class="flex items-baseline gap-x-3">
+                            <div id="totalVram" 
+                                 class="font-display text-6xl font-semibold tracking-[-3.5px] text-white mono">5.54</div>
+                            <div class="text-3xl text-zinc-400 font-medium pb-1">GB</div>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center gap-x-2 text-xs mt-auto pt-4">
+                        <div class="px-3 py-1 bg-zinc-950 border border-zinc-700 rounded-2xl flex items-center">
+                            <i class="fa-solid fa-plus text-emerald-400 mr-1.5"></i>
+                            <span class="text-emerald-300">+ ~1 GB</span>
+                            <span class="text-zinc-400 ml-1">runtime overhead included</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GPU Fit Checker -->
+                <div class="md:col-span-5 bg-zinc-900 border border-zinc-700 rounded-3xl p-6 section-card">
+                    <div class="flex items-center justify-between mb-3">
+                        <div>
+                            <div class="text-xs tracking-widest text-zinc-400 font-medium">YOUR GPU</div>
+                            <div class="flex items-center gap-x-2">
+                                <input type="number" id="gpuVram" value="24" step="1" min="4" max="192"
+                                       class="w-20 bg-zinc-950 border border-zinc-600 focus:border-emerald-400 transition-colors rounded-2xl px-3 py-1.5 text-xl font-semibold mono focus:outline-none">
+                                <span class="text-lg text-zinc-300">GB</span>
+                            </div>
+                        </div>
+                        
+                        <div id="fitStatus" 
+                             class="px-4 py-2 rounded-2xl text-sm font-semibold flex items-center gap-x-2 min-w-[138px] justify-center border">
+                            <!-- Dynamic content from JS -->
+                        </div>
+                    </div>
+                    
+                    <div id="fitMessage" class="text-xs px-1 text-zinc-400"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer notes -->
+        <div class="mt-8 text-center">
+            <div class="text-[10px] text-zinc-500 max-w-md mx-auto">
+                Estimates are based on llama.cpp / GGUF conventions. Real usage may vary ±5-15% depending on inference engine (vLLM, Hugging Face, exllama, etc), 
+                CUDA version, batch size &amp; tensor parallelism. KV cache uses batch size = 1 assumption.
+            </div>
+            <div class="mt-3 flex justify-center gap-x-4">
+                <button onclick="copySummary()" 
+                        class="text-xs flex items-center gap-x-1.5 px-4 py-2 hover:bg-zinc-800 active:bg-zinc-700 transition-colors rounded-2xl border border-zinc-700 text-zinc-300">
+                    <i class="fa-solid fa-copy"></i>
+                    <span>Copy summary</span>
+                </button>
+                <button onclick="resetToDefaults()" 
+                        class="text-xs flex items-center gap-x-1.5 px-4 py-2 hover:bg-zinc-800 active:bg-zinc-700 transition-colors rounded-2xl border border-zinc-700 text-zinc-300">
+                    <i class="fa-solid fa-undo"></i>
+                    <span>Reset defaults</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tailwind script
+        function initTailwind() {
+            document.documentElement.style.setProperty('--accent', '#6366f1');
+        }
+
+        // Quantization data for weights (realistic bytes per parameter from GGUF)
+        const weightQuants = {
+            'fp16':   { bytes: 2.00, name: 'FP16 / BF16',     short: 'FP16',   desc: 'Full precision' },
+            'q8_0':   { bytes: 1.03, name: 'Q8_0',            short: 'Q8_0',   desc: '8-bit' },
+            'q6_k':   { bytes: 0.79, name: 'Q6_K',            short: 'Q6_K',   desc: '6-bit K-quant' },
+            'q5_k_m': { bytes: 0.66, name: 'Q5_K_M',          short: 'Q5_K_M', desc: '5-bit medium' },
+            'q4_k_m': { bytes: 0.56, name: 'Q4_K_M',          short: 'Q4_K_M', desc: 'Popular 4-bit' },
+            'q3_k_m': { bytes: 0.47, name: 'Q3_K_M',          short: 'Q3_K_M', desc: '3-bit medium' },
+            'q2_k':   { bytes: 0.36, name: 'Q2_K',            short: 'Q2_K',   desc: '2-bit' }
+        };
+
+        // Popular architecture presets (accurate KV dimensions)
+        const archPresets = [
+            { id: 'llama3_8b',   name: 'Llama 3.1 / 3.2 8B (GQA)',      params: 8.03,  layers: 32, kvDim: 1024 },
+            { id: 'llama3_70b',  name: 'Llama 3.1 70B (GQA)',           params: 70.6,  layers: 80, kvDim: 1024 },
+            { id: 'llama2_7b',   name: 'Llama 2 7B (MHA)',              params: 6.74,  layers: 32, kvDim: 4096 },
+            { id: 'llama2_13b',  name: 'Llama 2 13B (MHA)',             params: 13.0,  layers: 40, kvDim: 5120 },
+            { id: 'qwen2_7b',    name: 'Qwen2 / Qwen2.5 7B (GQA)',      params: 7.62,  layers: 28, kvDim: 1024 },
+            { id: 'qwen2_72b',   name: 'Qwen2.5 72B (GQA)',             params: 72.7,  layers: 80, kvDim: 1024 },
+            { id: 'mistral_7b',  name: 'Mistral 7B v0.3 (GQA)',         params: 7.25,  layers: 32, kvDim: 1024 },
+            { id: 'phi3_mini',   name: 'Phi-3 Mini 3.8B',               params: 3.82,  layers: 32, kvDim: 3072 },
+            { id: 'gemma2_9b',   name: 'Gemma 2 9B (GQA)',              params: 9.24,  layers: 42, kvDim: 1024 },
+            { id: 'custom',      name: 'Custom / Manual entry',         params: 7.0,   layers: 32, kvDim: 4096 }
+        ];
+
+        let currentKVQuant = 'q8'; // default
+
+        // DOM element references (cached)
+        let els = {};
+
+        function cacheElements() {
+            els = {
+                params: document.getElementById('params'),
+                paramsValue: document.getElementById('paramsValue'),
+                weightQuant: document.getElementById('weightQuant'),
+                weightsVram: document.getElementById('weightsVram'),
+                weightsBytesPerParam: document.getElementById('weightsBytesPerParam'),
+                
+                context: document.getElementById('context'),
+                contextSlider: document.getElementById('contextSlider'),
+                contextValue: document.getElementById('contextValue'),
+                
+                kvFp16Btn: document.getElementById('kvFp16Btn'),
+                kvQ8Btn: document.getElementById('kvQ8Btn'),
+                
+                archPreset: document.getElementById('archPreset'),
+                numLayers: document.getElementById('numLayers'),
+                kvDim: document.getElementById('kvDim'),
+                
+                kvVram: document.getElementById('kvVram'),
+                kvElementSize: document.getElementById('kvElementSize'),
+                
+                vramCanvas: document.getElementById('vramCanvas'),
+                
+                totalVram: document.getElementById('totalVram'),
+                gpuVram: document.getElementById('gpuVram'),
+                fitStatus: document.getElementById('fitStatus'),
+                fitMessage: document.getElementById('fitMessage'),
+                
+                paramPresets: document.getElementById('paramPresets'),
+                canvasMaxLabel: document.getElementById('canvasMaxLabel')
+            };
+        }
+
+        function populateWeightQuantSelect() {
+            const select = els.weightQuant;
+            select.innerHTML = '';
+            
+            Object.keys(weightQuants).forEach(key => {
+                const q = weightQuants[key];
+                const option = document.createElement('option');
+                option.value = key;
+                option.textContent = `${q.name}  —  ~${q.bytes} B/param`;
+                select.appendChild(option);
+            });
+            
+            // Default to Q4_K_M (most popular for local)
+            select.value = 'q4_k_m';
+        }
+
+        function populateArchPresets() {
+            const select = els.archPreset;
+            select.innerHTML = '';
+            
+            archPresets.forEach(preset => {
+                const option = document.createElement('option');
+                option.value = preset.id;
+                option.textContent = preset.name;
+                select.appendChild(option);
+            });
+            
+            // Default to Llama 3 8B
+            select.value = 'llama3_8b';
+        }
+
+        function populateParamQuickButtons() {
+            const container = els.paramPresets;
+            container.innerHTML = '';
+            
+            const sizes = [1, 3, 7, 8, 13, 34, 70, 405];
+            
+            sizes.forEach(size => {
+                const btn = document.createElement('button');
+                btn.className = `preset-btn text-xs px-3 py-1 border border-zinc-700 hover:border-zinc-500 active:bg-zinc-800 rounded-2xl text-zinc-300 font-medium`;
+                btn.textContent = `${size}B`;
+                btn.onclick = () => {
+                    els.params.value = size;
+                    updateAll();
+                };
+                container.appendChild(btn);
+            });
+        }
+
+        function updateParamsDisplay() {
+            const val = parseFloat(els.params.value) || 7;
+            els.paramsValue.textContent = `${val.toFixed(1)} B`;
+        }
+
+        function updateContextDisplay() {
+            const val = parseInt(els.context.value) || 8192;
+            els.contextValue.textContent = `${val.toLocaleString()} tokens`;
+            els.contextSlider.value = val;
+        }
+
+        function setContext(tokens) {
+            els.context.value = tokens;
+            els.contextSlider.value = tokens;
+            updateAll();
+        }
+
+        function selectKVQuant(type) {
+            currentKVQuant = type;
+            
+            // Update button styles
+            if (type === 'fp16') {
+                els.kvFp16Btn.classList.add('active', 'border-indigo-400');
+                els.kvQ8Btn.classList.remove('active', 'border-indigo-400');
+            } else {
+                els.kvQ8Btn.classList.add('active', 'border-indigo-400');
+                els.kvFp16Btn.classList.remove('active', 'border-indigo-400');
+            }
+            
+            updateAll();
+        }
+
+        function loadArchPreset(presetId) {
+            const preset = archPresets.find(p => p.id === presetId);
+            if (!preset) return;
+            
+            // Update values
+            els.params.value = preset.params;
+            els.numLayers.value = preset.layers;
+            els.kvDim.value = preset.kvDim;
+            
+            // If custom, don't force anything extra
+            updateAll();
+        }
+
+        function calculateWeights() {
+            const paramsB = parseFloat(els.params.value) || 7;
+            const quantKey = els.weightQuant.value;
+            const q = weightQuants[quantKey] || weightQuants['q4_k_m'];
+            
+            const vramGB = paramsB * q.bytes;
+            
+            els.weightsVram.textContent = vramGB.toFixed(2);
+            els.weightsBytesPerParam.textContent = `${q.bytes.toFixed(2)} B/param`;
+            
+            return vramGB;
+        }
+
+        function calculateKV() {
+            const context = parseInt(els.context.value) || 8192;
+            const layers = parseInt(els.numLayers.value) || 32;
+            const kvDim = parseInt(els.kvDim.value) || 1024;
+            
+            const bytesPerElement = (currentKVQuant === 'fp16') ? 2.0 : 1.0;
+            
+            // Formula: 2 (K + V) × layers × context × kvDim × bytesPerElement
+            const elements = layers * context * 2 * kvDim;
+            const bytes = elements * bytesPerElement;
+            const vramGB = bytes / (1024 ** 3);
+            
+            els.kvVram.textContent = vramGB.toFixed(2);
+            els.kvElementSize.textContent = `${bytesPerElement.toFixed(2)} byte/element`;
+            
+            return vramGB;
+        }
+
+        function drawVramBar(weightsGB, kvGB) {
+            const canvas = els.vramCanvas;
+            const ctx = canvas.getContext('2d', { alpha: true });
+            
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            
+            // Make canvas crisp
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.scale(dpr, dpr);
+            
+            const W = rect.width;
+            const H = rect.height;
+            
+            ctx.clearRect(0, 0, W, H);
+            
+            const total = weightsGB + kvGB + 1.0; // +1GB overhead
+            const maxDisplay = Math.max(total * 1.15, parseFloat(els.gpuVram.value) || 24);
+            
+            els.canvasMaxLabel.textContent = `~${Math.ceil(maxDisplay)} GB`;
+            
+            const scale = (W - 40) / maxDisplay; // padding
+            
+            const barY = 22;
+            const barH = 42;
+            const barX = 20;
+            
+            // Background track
+            ctx.fillStyle = '#27251f';
+            ctx.beginPath();
+            ctx.roundRect(barX, barY, W - 40, barH, 999);
+            ctx.fill();
+            
+            let x = barX;
+            const cornerRadius = 999;
+            
+            // === WEIGHTS segment ===
+            const weightsW = Math.max(weightsGB * scale, 8);
+            ctx.fillStyle = '#0ea5e9'; // sky-500
+            ctx.beginPath();
+            ctx.roundRect(x, barY, weightsW, barH, [cornerRadius, 0, 0, cornerRadius]);
+            ctx.fill();
+            
+            // Label inside weights if wide enough
+            if (weightsW > 85) {
+                ctx.fillStyle = 'white';
+                ctx.font = '600 13px Inter, system-ui, sans-serif';
+                ctx.fillText(`Weights  ${weightsGB.toFixed(1)}GB`, x + 12, barY + 27);
+            }
+            
+            x += weightsW;
+            
+            // === KV CACHE segment ===
+            const kvW = Math.max(kvGB * scale, 6);
+            ctx.fillStyle = '#8b5cf6'; // violet-500
+            ctx.fillRect(x, barY, kvW, barH);
+            
+            if (kvW > 70) {
+                ctx.fillStyle = 'white';
+                ctx.font = '600 13px Inter, system-ui, sans-serif';
+                ctx.fillText(`KV  ${kvGB.toFixed(1)}GB`, x + 10, barY + 27);
+            }
+            
+            x += kvW;
+            
+            // === OVERHEAD segment ===
+            const overheadW = Math.max(1.0 * scale, 4);
+            ctx.fillStyle = '#10b981'; // emerald-500
+            ctx.globalAlpha = 0.75;
+            ctx.fillRect(x, barY, overheadW, barH);
+            ctx.globalAlpha = 1.0;
+            
+            if (overheadW > 50) {
+                ctx.fillStyle = 'white';
+                ctx.font = '600 12px Inter, system-ui, sans-serif';
+                ctx.fillText(`+1GB`, x + 8, barY + 27);
+            }
+            
+            // Right rounded end for last segment
+            ctx.fillStyle = '#10b981';
+            ctx.globalAlpha = 0.75;
+            ctx.beginPath();
+            ctx.roundRect(x, barY, overheadW, barH, [0, cornerRadius, cornerRadius, 0]);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            
+            // Total label on far right
+            ctx.fillStyle = '#64748b';
+            ctx.font = '500 11px Inter, system-ui, sans-serif';
+            ctx.fillText(`${total.toFixed(1)} GB total`, W - 95, barY + 27);
+            
+            // Your GPU line indicator
+            const gpuGB = parseFloat(els.gpuVram.value) || 24;
+            const gpuX = barX + (gpuGB * scale);
+            
+            if (gpuX < W - 10) {
+                ctx.strokeStyle = '#f59e0b';
+                ctx.lineWidth = 2.5;
+                ctx.setLineDash([4, 3]);
+                ctx.beginPath();
+                ctx.moveTo(gpuX, barY - 6);
+                ctx.lineTo(gpuX, barY + barH + 8);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+                ctx.fillStyle = '#f59e0b';
+                ctx.font = '500 10px Inter, system-ui, sans-serif';
+                ctx.fillText(`${gpuGB}GB GPU`, gpuX - 28, barY - 10);
+            }
+            
+            // If total exceeds GPU, show overflow warning on bar
+            if (total > gpuGB) {
+                const overflowStart = barX + (gpuGB * scale);
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.35)';
+                ctx.fillRect(overflowStart, barY, (total - gpuGB) * scale, barH);
+                
+                ctx.fillStyle = '#ef4444';
+                ctx.font = '700 11px Inter, system-ui, sans-serif';
+                ctx.fillText('OVER', overflowStart + 6, barY + 27);
+            }
+        }
+
+        function updateTotalAndFit(weightsGB, kvGB) {
+            const overhead = 1.0;
+            const total = weightsGB + kvGB + overhead;
+            
+            els.totalVram.textContent = total.toFixed(2);
+            
+            // GPU fit check
+            const gpu = parseFloat(els.gpuVram.value) || 24;
+            const fitEl = els.fitStatus;
+            const msgEl = els.fitMessage;
+            
+            if (total <= gpu) {
+                fitEl.innerHTML = `<i class="fa-solid fa-check-circle mr-1.5"></i> <span>FITS</span>`;
+                fitEl.className = `px-4 py-2 rounded-2xl text-sm font-semibold flex items-center gap-x-2 justify-center border bg-emerald-900/30 border-emerald-600 text-emerald-400`;
+                msgEl.innerHTML = `<span class="text-emerald-400">${(gpu - total).toFixed(1)} GB headroom remaining</span>`;
+            } else {
+                const overBy = (total - gpu).toFixed(1);
+                fitEl.innerHTML = `<i class="fa-solid fa-times-circle mr-1.5"></i> <span>OVER BY ${overBy} GB</span>`;
+                fitEl.className = `px-4 py-2 rounded-2xl text-sm font-semibold flex items-center gap-x-2 justify-center border bg-red-900/30 border-red-600 text-red-400`;
+                msgEl.innerHTML = `<span class="text-red-400">Consider lower quant, shorter context, or multi-GPU</span>`;
+            }
+        }
+
+        function updateAll() {
+            updateParamsDisplay();
+            updateContextDisplay();
+            
+            const weightsGB = calculateWeights();
+            const kvGB = calculateKV();
+            
+            // Update canvas
+            drawVramBar(weightsGB, kvGB);
+            
+            // Total + fit
+            updateTotalAndFit(weightsGB, kvGB);
+        }
+
+        function attachListeners() {
+            // All inputs that should trigger recalc
+            const inputs = [
+                els.params, els.weightQuant, 
+                els.context, els.contextSlider,
+                els.numLayers, els.kvDim,
+                els.gpuVram
+            ];
+            
+            inputs.forEach(el => {
+                if (!el) return;
+                el.addEventListener('input', () => {
+                    // Sync slider and number for context
+                    if (el.id === 'contextSlider') {
+                        els.context.value = el.value;
+                    }
+                    if (el.id === 'context') {
+                        els.contextSlider.value = el.value;
+                    }
+                    updateAll();
+                });
+                
+                // Also on change for selects
+                if (el.tagName === 'SELECT') {
+                    el.addEventListener('change', updateAll);
+                }
+            });
+            
+            // Architecture preset change
+            els.archPreset.addEventListener('change', (e) => {
+                loadArchPreset(e.target.value);
+            });
+            
+            // Also update on advanced field blur (in case of manual typing)
+            [els.numLayers, els.kvDim].forEach(el => {
+                el.addEventListener('blur', updateAll);
+            });
+            
+            // Initial KV button state
+            els.kvQ8Btn.classList.add('active', 'border-indigo-400');
+        }
+
+        function copySummary() {
+            const params = parseFloat(els.params.value);
+            const quant = els.weightQuant.options[els.weightQuant.selectedIndex].text;
+            const context = parseInt(els.context.value);
+            const kvType = currentKVQuant.toUpperCase();
+            const weights = els.weightsVram.textContent;
+            const kv = els.kvVram.textContent;
+            const total = els.totalVram.textContent;
+            const gpu = els.gpuVram.value;
+            
+            const text = `LLM VRAM Estimate\n` +
+                         `Model: ${params}B  •  ${quant}\n` +
+                         `Context: ${context.toLocaleString()} tokens  •  KV: ${kvType}\n` +
+                         `Weights: ${weights} GB\n` +
+                         `KV Cache: ${kv} GB\n` +
+                         `─────────────────────\n` +
+                         `TOTAL: ${total} GB  (on ${gpu} GB GPU)`;
+            
+            navigator.clipboard.writeText(text).then(() => {
+                const origText = event.currentTarget?.innerHTML || '';
+                // Simple feedback
+                const btns = document.querySelectorAll('button');
+                btns.forEach(b => {
+                    if (b.textContent.includes('Copy')) {
+                        const old = b.innerHTML;
+                        b.innerHTML = `<i class="fa-solid fa-check"></i> <span>Copied!</span>`;
+                        setTimeout(() => {
+                            b.innerHTML = old;
+                        }, 1600);
+                    }
+                });
+            }).catch(() => {
+                // Fallback
+                prompt('Copy this summary:', text);
+            });
+        }
+
+        function resetToDefaults() {
+            // Reset to sensible defaults (Llama 3 8B Q4_K_M + 8k context + Q8 KV + 24GB GPU)
+            els.params.value = 8.03;
+            els.weightQuant.value = 'q4_k_m';
+            els.context.value = 8192;
+            els.contextSlider.value = 8192;
+            els.archPreset.value = 'llama3_8b';
+            els.numLayers.value = 32;
+            els.kvDim.value = 1024;
+            currentKVQuant = 'q8';
+            
+            // Reset KV buttons
+            els.kvQ8Btn.classList.add('active', 'border-indigo-400');
+            els.kvFp16Btn.classList.remove('active', 'border-indigo-400');
+            
+            els.gpuVram.value = 24;
+            
+            updateAll();
+        }
+
+        function initialize() {
+            initTailwind();
+            cacheElements();
+            
+            populateWeightQuantSelect();
+            populateArchPresets();
+            populateParamQuickButtons();
+            
+            // Set initial KV button styles
+            els.kvQ8Btn.classList.add('active', 'border-indigo-400');
+            
+            // Set initial architecture (will also set params, layers, kvDim)
+            els.archPreset.value = 'llama3_8b';
+            loadArchPreset('llama3_8b');
+            
+            // Set good defaults
+            els.weightQuant.value = 'q4_k_m';
+            els.context.value = 8192;
+            els.contextSlider.value = 8192;
+            els.gpuVram.value = 24;
+            
+            // Attach all interactive listeners
+            attachListeners();
+            
+            // First calculation + draw
+            setTimeout(() => {
+                updateAll();
+            }, 80);
+            
+            // Bonus: keyboard support hint
+            console.log('%c[LLM VRAM Calculator] Ready. All calculations are live.', 'color:#52525b');
+        }
+
+        // Boot the app
+        window.onload = initialize;
+    </script>
+</body>
+</html>
